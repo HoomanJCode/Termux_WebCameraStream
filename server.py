@@ -65,14 +65,13 @@ class AppState:
         self.static_dir = None
         self.ws_clients = []
         self.browser_frame = None
-        self.capture_mode = 'termux'  # 'termux' or 'browser'
+        self.capture_mode = 'termux'
         self.frame_lock = threading.Lock()
         self.current_fps = 0
         self.fps_counter = 0
         self.fps_timer = time.time()
-        # Separate settings for browser mode
         self.browser_settings = {
-            'camera_facing': 'environment',  # 'user' for front, 'environment' for back
+            'camera_facing': 'environment',
             'width': 640,
             'height': 480,
             'quality': 50,
@@ -139,6 +138,14 @@ class CameraHandler(BaseHTTPRequestHandler):
             
             client = WebSocketClient(self.request)
             app.ws_clients.append(client)
+            print(f"WebSocket client connected (total: {len(app.ws_clients)})")
+            
+            # Send current settings to new client
+            settings_msg = json.dumps({
+                'type': 'settings',
+                'settings': app.browser_settings
+            })
+            client.send(settings_msg)
             
             while client.connected:
                 try:
@@ -165,8 +172,21 @@ class CameraHandler(BaseHTTPRequestHandler):
                     else:
                         data = self.request.recv(length)
                     
-                    # Only store browser frames if in browser mode
-                    if data and app.capture_mode == 'browser':
+                    # Handle text messages (commands)
+                    if opcode == 0x1:
+                        try:
+                            msg = json.loads(data.decode('utf-8'))
+                            if msg.get('type') == 'get_settings':
+                                settings_msg = json.dumps({
+                                    'type': 'settings',
+                                    'settings': app.browser_settings
+                                })
+                                client.send(settings_msg)
+                        except:
+                            pass
+                    
+                    # Store frames only if in browser mode
+                    if data and opcode == 0x2 and app.capture_mode == 'browser':
                         with app.frame_lock:
                             app.browser_frame = data
                         
@@ -186,6 +206,7 @@ class CameraHandler(BaseHTTPRequestHandler):
             if client in app.ws_clients:
                 app.ws_clients.remove(client)
             client.close()
+            print(f"WebSocket client disconnected (total: {len(app.ws_clients)})")
             return True
             
         except Exception as e:
@@ -214,6 +235,8 @@ class CameraHandler(BaseHTTPRequestHandler):
                 self._handle_get_browser_settings()
             elif path == '/api/stats':
                 self._handle_get_stats()
+            elif path == '/api/status':
+                self._handle_get_status()
             elif path == '/stream':
                 self._handle_stream()
             elif path == '/snapshot':
@@ -322,8 +345,15 @@ class CameraHandler(BaseHTTPRequestHandler):
         }
         self._send_response(200, 'application/json', json.dumps(stats))
     
+    def _handle_get_status(self):
+        """Get server status for capture page"""
+        status = {
+            'capture_mode': app.capture_mode,
+            'should_capture': app.capture_mode == 'browser'
+        }
+        self._send_response(200, 'application/json', json.dumps(status))
+    
     def _handle_post_settings(self, data):
-        """Handle termux camera settings"""
         if app.settings and data:
             data.pop('fps', None)
             app.settings.update(data)
@@ -332,7 +362,6 @@ class CameraHandler(BaseHTTPRequestHandler):
         self._send_response(200, 'application/json', json.dumps({'status': 'ok'}))
     
     def _handle_post_browser_settings(self, data):
-        """Handle browser camera settings"""
         for key in app.browser_settings:
             if key in data:
                 app.browser_settings[key] = data[key]
@@ -342,12 +371,16 @@ class CameraHandler(BaseHTTPRequestHandler):
             'type': 'settings',
             'settings': app.browser_settings
         })
-        for client in app.ws_clients[:]:
+        dead_clients = []
+        for client in app.ws_clients:
             try:
                 client.send(settings_msg)
             except:
-                if client in app.ws_clients:
-                    app.ws_clients.remove(client)
+                dead_clients.append(client)
+        
+        for client in dead_clients:
+            if client in app.ws_clients:
+                app.ws_clients.remove(client)
         
         self._send_response(200, 'application/json', json.dumps({'status': 'ok'}))
     
@@ -362,12 +395,38 @@ class CameraHandler(BaseHTTPRequestHandler):
                 app.camera.toggle_flash(False)
         elif command == 'switch_capture':
             mode = data.get('mode', 'termux')
+            old_mode = app.capture_mode
             app.capture_mode = mode
-            if mode != 'browser':
+            
+            if mode == 'browser':
+                # Stop termux camera
+                if app.camera:
+                    app.camera.stop()
+                with app.frame_lock:
+                    app.browser_frame = None
+                print("Switched to browser mode - Termux camera stopped")
+            else:
+                # Start termux camera
+                if app.camera:
+                    app.camera.start()
                 with app.frame_lock:
                     app.browser_frame = None
                 app.current_fps = 0
-            print(f"Capture mode switched to: {mode}")
+                print("Switched to termux mode - Termux camera started")
+            
+            # Notify capture page about mode change
+            status_msg = json.dumps({
+                'type': 'mode_change',
+                'mode': mode,
+                'should_capture': mode == 'browser'
+            })
+            for client in app.ws_clients[:]:
+                try:
+                    client.send(status_msg)
+                except:
+                    if client in app.ws_clients:
+                        app.ws_clients.remove(client)
+            
             self._send_response(200, 'application/json', 
                               json.dumps({'status': 'ok', 'mode': mode}))
             return
@@ -498,6 +557,7 @@ def main():
     app.settings = Settings()
     app.camera = CameraCapture(app.settings)
     
+    # Start termux camera by default
     app.camera.start()
     
     server = ThreadingHTTPServer(('', args.port), CameraHandler)
@@ -508,6 +568,8 @@ def main():
     print(f"\n📡 Server running on port {args.port}")
     print(f"📱 Phone capture: http://localhost:{args.port}/capture")
     print(f"🖥️  PC viewer: http://localhost:{args.port}")
+    print(f"\n📸 Default mode: Termux Camera")
+    print(f"   Switch to Browser mode for high FPS")
     print(f"\nPress Ctrl+C to stop\n")
     
     server_thread = threading.Thread(target=server.serve_forever)
