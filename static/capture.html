@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Capture</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            text-align: center;
+            color: white;
+        }
+        video {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 10px;
+            display: none;
+        }
+        canvas {
+            display: none;
+        }
+        .status {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        .fps {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+            font-size: 20px;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background: #4a90d9;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="fps" id="fps">FPS: 0</div>
+    <div class="container">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        <button id="startBtn">Start Camera</button>
+        <button id="stopBtn" disabled>Stop Camera</button>
+        <div class="status" id="status">Ready - Click Start</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const fpsDisplay = document.getElementById('fps');
+        
+        let stream = null;
+        let ws = null;
+        let capturing = false;
+        let frameCount = 0;
+        let lastFpsUpdate = Date.now();
+        let currentFps = 0;
+        
+        const serverUrl = window.location.origin.replace('http', 'ws');
+        
+        function updateFPS() {
+            frameCount++;
+            const now = Date.now();
+            if (now - lastFpsUpdate >= 1000) {
+                currentFps = frameCount;
+                frameCount = 0;
+                lastFpsUpdate = now;
+                fpsDisplay.textContent = `FPS: ${currentFps}`;
+            }
+        }
+        
+        function connectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+            
+            ws = new WebSocket(serverUrl);
+            
+            ws.onopen = () => {
+                status.textContent = 'Connected - Streaming';
+                status.style.color = '#2ecc71';
+            };
+            
+            ws.onerror = () => {
+                status.textContent = 'Connection error - retrying...';
+                status.style.color = '#e74c3c';
+                if (capturing) {
+                    setTimeout(connectWebSocket, 1000);
+                }
+            };
+            
+            ws.onclose = () => {
+                status.textContent = 'Disconnected';
+                status.style.color = '#e74c3c';
+                if (capturing) {
+                    setTimeout(connectWebSocket, 1000);
+                }
+            };
+        }
+        
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: false
+                });
+                
+                video.srcObject = stream;
+                video.style.display = 'block';
+                
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        resolve();
+                    };
+                });
+                
+                connectWebSocket();
+                
+                capturing = true;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = 'Capturing...';
+                status.style.color = '#2ecc71';
+                
+                // Start capture loop
+                requestAnimationFrame(captureFrame);
+                
+            } catch (err) {
+                console.error('Camera error:', err);
+                status.textContent = 'Error: ' + err.message;
+                status.style.color = '#e74c3c';
+            }
+        }
+        
+        function stopCamera() {
+            capturing = false;
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            video.style.display = 'none';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = 'Stopped';
+            status.style.color = 'white';
+        }
+        
+        function captureFrame() {
+            if (!capturing) return;
+            
+            try {
+                // Draw video frame to canvas
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Get JPEG at lower quality for speed
+                const jpegData = canvas.toDataURL('image/jpeg', 0.5);
+                const base64Data = jpegData.split(',')[1];
+                
+                // Convert to binary
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // Send via WebSocket
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(bytes);
+                }
+                
+                updateFPS();
+                
+            } catch (err) {
+                console.error('Capture error:', err);
+            }
+            
+            // Schedule next frame immediately
+            if (capturing) {
+                requestAnimationFrame(captureFrame);
+            }
+        }
+        
+        startBtn.addEventListener('click', startCamera);
+        stopBtn.addEventListener('click', stopCamera);
+    </script>
+</body>
+</html>

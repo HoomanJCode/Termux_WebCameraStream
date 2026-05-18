@@ -1,0 +1,17 @@
+{
+  "camera_id": 0,
+  "width": 1280,
+  "height": 720,
+  "fps": 1,
+  "quality": 100,
+  "mirror_h": false,
+  "mirror_v": false,
+  "rotation": 0,
+  "zoom": 1,
+  "flash": false,
+  "show_timestamp": false,
+  "show_grid": false,
+  "motion_detection": true,
+  "motion_threshold": 30,
+  "theme": "dark"
+}
