@@ -26,11 +26,12 @@
         }
         .mode-badge.active { background: #2ecc71; }
         .mode-badge.inactive { background: #e74c3c; }
+        .mode-badge.waiting { background: #f39c12; }
     </style>
 </head>
 <body>
     <div class="fps" id="fps">FPS: 0</div>
-    <div class="mode-badge inactive" id="modeBadge">STOPPED</div>
+    <div class="mode-badge waiting" id="modeBadge">WAITING</div>
     <div class="container">
         <video id="video" autoplay playsinline></video>
         <canvas id="canvas"></canvas>
@@ -53,6 +54,7 @@
         let lastFpsUpdate = Date.now();
         let currentFps = 0;
         let currentQuality = 0.5;
+        let statusPollInterval = null;
         
         const serverUrl = window.location.origin.replace('http', 'ws');
         
@@ -72,75 +74,103 @@
                 ws.close();
             }
             
-            ws = new WebSocket(serverUrl);
-            
-            ws.onopen = () => {
-                status.textContent = 'Connected';
-                status.style.color = '#2ecc71';
-                // Request current settings
-                ws.send(JSON.stringify({ type: 'get_settings' }));
-                // Check if we should be capturing
-                checkStatus();
-            };
-            
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'settings') {
-                        // Update quality from server settings
-                        if (data.settings.quality !== undefined) {
-                            currentQuality = data.settings.quality / 100;
-                            console.log('Quality updated:', currentQuality);
+            try {
+                ws = new WebSocket(serverUrl);
+                
+                ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    status.textContent = 'Connected';
+                    status.style.color = '#2ecc71';
+                    // Request current settings
+                    ws.send(JSON.stringify({ type: 'get_settings' }));
+                    // Check status immediately
+                    checkStatus();
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'settings') {
+                            if (data.settings.quality !== undefined) {
+                                currentQuality = data.settings.quality / 100;
+                                console.log('Quality updated:', currentQuality);
+                            }
                         }
-                    }
-                    
-                    if (data.type === 'mode_change') {
-                        shouldCapture = data.should_capture;
-                        if (shouldCapture) {
-                            startCapture();
-                        } else {
-                            stopCapture();
+                        
+                        if (data.type === 'mode_change') {
+                            console.log('Mode change received:', data.mode);
+                            shouldCapture = data.should_capture;
+                            if (shouldCapture) {
+                                startCapture();
+                            } else {
+                                stopCapture();
+                            }
+                            updateBadge();
                         }
-                        updateBadge();
+                    } catch(e) {
+                        console.error('Message parse error:', e);
                     }
-                } catch(e) {}
-            };
-            
-            ws.onerror = () => {
-                status.textContent = 'Connection error - retrying...';
-                status.style.color = '#e74c3c';
+                };
+                
+                ws.onerror = (e) => {
+                    console.error('WebSocket error');
+                    status.textContent = 'Connection error';
+                    status.style.color = '#e74c3c';
+                };
+                
+                ws.onclose = () => {
+                    console.log('WebSocket closed, reconnecting...');
+                    status.textContent = 'Reconnecting...';
+                    status.style.color = '#e74c3c';
+                    setTimeout(connectWebSocket, 2000);
+                };
+            } catch(e) {
+                console.error('WebSocket connection error:', e);
                 setTimeout(connectWebSocket, 2000);
-            };
-            
-            ws.onclose = () => {
-                status.textContent = 'Disconnected - retrying...';
-                status.style.color = '#e74c3c';
-                setTimeout(connectWebSocket, 2000);
-            };
+            }
+        }
+        
+        // Poll status every 2 seconds as backup
+        function startStatusPoll() {
+            if (statusPollInterval) clearInterval(statusPollInterval);
+            statusPollInterval = setInterval(checkStatus, 2000);
         }
         
         async function checkStatus() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                shouldCapture = data.should_capture;
-                if (shouldCapture) {
-                    startCapture();
+                console.log('Status check:', data);
+                
+                const newShouldCapture = data.should_capture;
+                
+                if (newShouldCapture !== shouldCapture) {
+                    shouldCapture = newShouldCapture;
+                    console.log('Capture state changed:', shouldCapture);
+                    
+                    if (shouldCapture) {
+                        await startCapture();
+                    } else {
+                        stopCapture();
+                    }
+                    updateBadge();
                 }
-                updateBadge();
             } catch(e) {
                 console.error('Status check error:', e);
             }
         }
         
         function updateBadge() {
-            if (shouldCapture && capturing) {
+            if (capturing && shouldCapture) {
                 modeBadge.textContent = 'STREAMING';
                 modeBadge.className = 'mode-badge active';
-            } else if (shouldCapture) {
+            } else if (shouldCapture && !capturing) {
                 modeBadge.textContent = 'STARTING...';
-                modeBadge.className = 'mode-badge inactive';
+                modeBadge.className = 'mode-badge waiting';
+            } else if (!shouldCapture && capturing) {
+                modeBadge.textContent = 'STOPPING...';
+                modeBadge.className = 'mode-badge waiting';
             } else {
                 modeBadge.textContent = 'STOPPED';
                 modeBadge.className = 'mode-badge inactive';
@@ -148,10 +178,16 @@
         }
         
         async function startCapture() {
-            if (capturing) return;
+            if (capturing) {
+                console.log('Already capturing');
+                return;
+            }
+            
+            console.log('Starting capture...');
+            updateBadge();
             
             try {
-                // Stop existing stream if any
+                // Stop existing stream
                 if (stream) {
                     stream.getTracks().forEach(track => track.stop());
                     stream = null;
@@ -174,6 +210,7 @@
                     video.onloadedmetadata = () => {
                         canvas.width = video.videoWidth;
                         canvas.height = video.videoHeight;
+                        console.log('Video ready:', canvas.width, 'x', canvas.height);
                         resolve();
                     };
                 });
@@ -197,6 +234,7 @@
         }
         
         function stopCapture() {
+            console.log('Stopping capture...');
             capturing = false;
             
             if (stream) {
@@ -212,15 +250,15 @@
         
         function captureFrame() {
             if (!capturing || !shouldCapture) {
-                // Stop if we shouldn't be capturing
-                if (capturing) stopCapture();
+                if (capturing && !shouldCapture) {
+                    stopCapture();
+                }
                 return;
             }
             
             try {
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                // Use quality from server settings
                 const jpegData = canvas.toDataURL('image/jpeg', currentQuality);
                 const base64Data = jpegData.split(',')[1];
                 
@@ -245,8 +283,11 @@
             }
         }
         
-        // Start connection
+        // Initialize
+        console.log('Initializing capture page...');
         connectWebSocket();
+        startStatusPoll();
+        checkStatus();
     </script>
 </body>
 </html>
