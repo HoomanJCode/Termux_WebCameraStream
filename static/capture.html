@@ -11,26 +11,36 @@
             min-height: 100vh; font-family: Arial, sans-serif;
         }
         .container { text-align: center; color: white; }
-        video { width: 100%; max-width: 640px; border-radius: 10px; display: none; }
+        video { display: none; }
         canvas { display: none; }
         .status { margin-top: 20px; font-size: 18px; }
+        .info-panel {
+            position: fixed; top: 10px; left: 10px; right: 10px;
+            display: flex; justify-content: space-between; z-index: 100;
+        }
         .fps {
-            position: fixed; top: 10px; left: 10px;
             background: rgba(0,0,0,0.7); color: white;
-            padding: 10px; border-radius: 5px; z-index: 100; font-size: 20px;
+            padding: 10px; border-radius: 5px; font-size: 20px;
+        }
+        .settings-info {
+            background: rgba(0,0,0,0.7); color: white;
+            padding: 10px; border-radius: 5px; font-size: 12px;
+            text-align: right; max-width: 220px;
         }
         .mode-badge {
-            position: fixed; top: 10px; right: 10px;
-            background: rgba(0,0,0,0.7); color: white;
-            padding: 10px; border-radius: 5px; z-index: 100; font-size: 14px;
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; border-radius: 5px; z-index: 100; font-size: 14px;
         }
-        .mode-badge.active { background: #2ecc71; }
-        .mode-badge.inactive { background: #e74c3c; }
-        .mode-badge.waiting { background: #f39c12; }
+        .mode-badge.active { background: #2ecc71; color: white; }
+        .mode-badge.inactive { background: #e74c3c; color: white; }
+        .mode-badge.waiting { background: #f39c12; color: white; }
     </style>
 </head>
 <body>
-    <div class="fps" id="fps">FPS: 0</div>
+    <div class="info-panel">
+        <div class="fps" id="fps">FPS: 0</div>
+        <div class="settings-info" id="settingsInfo">Loading...</div>
+    </div>
     <div class="mode-badge waiting" id="modeBadge">WAITING</div>
     <div class="container">
         <video id="video" autoplay playsinline></video>
@@ -45,6 +55,7 @@
         const status = document.getElementById('status');
         const fpsDisplay = document.getElementById('fps');
         const modeBadge = document.getElementById('modeBadge');
+        const settingsInfo = document.getElementById('settingsInfo');
         
         let stream = null;
         let ws = null;
@@ -53,10 +64,28 @@
         let frameCount = 0;
         let lastFpsUpdate = Date.now();
         let currentFps = 0;
-        let currentQuality = 0.5;
         let statusPollInterval = null;
         
+        let currentSettings = {
+            quality: 50,
+            width: 1280,
+            height: 720,
+            rotation: 0,
+            zoom: 1.0,
+            mirror_h: false,
+            mirror_v: false
+        };
+        
         const serverUrl = window.location.origin.replace('http', 'ws');
+        
+        function updateSettingsDisplay() {
+            const s = currentSettings;
+            settingsInfo.textContent = 
+                `Q:${s.quality}% | ${s.width}x${s.height}\n` +
+                `Rot:${s.rotation}° | Zoom:${s.zoom.toFixed(1)}x` +
+                (s.mirror_h ? ' | H' : '') +
+                (s.mirror_v ? ' | V' : '');
+        }
         
         function updateFPS() {
             frameCount++;
@@ -70,20 +99,15 @@
         }
         
         function connectWebSocket() {
-            if (ws) {
-                ws.close();
-            }
+            if (ws) { ws.close(); ws = null; }
             
             try {
                 ws = new WebSocket(serverUrl);
                 
                 ws.onopen = () => {
-                    console.log('WebSocket connected');
                     status.textContent = 'Connected';
                     status.style.color = '#2ecc71';
-                    // Request current settings
                     ws.send(JSON.stringify({ type: 'get_settings' }));
-                    // Check status immediately
                     checkStatus();
                 };
                 
@@ -92,46 +116,47 @@
                         const data = JSON.parse(event.data);
                         
                         if (data.type === 'settings') {
-                            if (data.settings.quality !== undefined) {
-                                currentQuality = data.settings.quality / 100;
-                                console.log('Quality updated:', currentQuality);
-                            }
+                            updateSettingsFromServer(data.settings);
                         }
                         
                         if (data.type === 'mode_change') {
-                            console.log('Mode change received:', data.mode);
                             shouldCapture = data.should_capture;
-                            if (shouldCapture) {
-                                startCapture();
-                            } else {
-                                stopCapture();
-                            }
+                            if (shouldCapture) startCapture();
+                            else stopCapture();
                             updateBadge();
                         }
-                    } catch(e) {
-                        console.error('Message parse error:', e);
-                    }
+                    } catch(e) {}
                 };
                 
-                ws.onerror = (e) => {
-                    console.error('WebSocket error');
-                    status.textContent = 'Connection error';
+                ws.onerror = () => {
+                    status.textContent = 'Error - retrying...';
                     status.style.color = '#e74c3c';
                 };
                 
                 ws.onclose = () => {
-                    console.log('WebSocket closed, reconnecting...');
                     status.textContent = 'Reconnecting...';
                     status.style.color = '#e74c3c';
                     setTimeout(connectWebSocket, 2000);
                 };
             } catch(e) {
-                console.error('WebSocket connection error:', e);
                 setTimeout(connectWebSocket, 2000);
             }
         }
         
-        // Poll status every 2 seconds as backup
+        function updateSettingsFromServer(settings) {
+            if (!settings) return;
+            
+            if (settings.quality !== undefined) currentSettings.quality = parseInt(settings.quality);
+            if (settings.width !== undefined) currentSettings.width = parseInt(settings.width);
+            if (settings.height !== undefined) currentSettings.height = parseInt(settings.height);
+            if (settings.rotation !== undefined) currentSettings.rotation = parseInt(settings.rotation);
+            if (settings.zoom !== undefined) currentSettings.zoom = parseFloat(settings.zoom);
+            if (settings.mirror_h !== undefined) currentSettings.mirror_h = settings.mirror_h;
+            if (settings.mirror_v !== undefined) currentSettings.mirror_v = settings.mirror_v;
+            
+            updateSettingsDisplay();
+        }
+        
         function startStatusPoll() {
             if (statusPollInterval) clearInterval(statusPollInterval);
             statusPollInterval = setInterval(checkStatus, 2000);
@@ -141,24 +166,18 @@
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                console.log('Status check:', data);
                 
-                const newShouldCapture = data.should_capture;
+                if (data.browser_settings) {
+                    updateSettingsFromServer(data.browser_settings);
+                }
                 
-                if (newShouldCapture !== shouldCapture) {
-                    shouldCapture = newShouldCapture;
-                    console.log('Capture state changed:', shouldCapture);
-                    
-                    if (shouldCapture) {
-                        await startCapture();
-                    } else {
-                        stopCapture();
-                    }
+                if (data.should_capture !== shouldCapture) {
+                    shouldCapture = data.should_capture;
+                    if (shouldCapture) await startCapture();
+                    else stopCapture();
                     updateBadge();
                 }
-            } catch(e) {
-                console.error('Status check error:', e);
-            }
+            } catch(e) {}
         }
         
         function updateBadge() {
@@ -178,40 +197,40 @@
         }
         
         async function startCapture() {
-            if (capturing) {
-                console.log('Already capturing');
-                return;
-            }
+            if (capturing && stream) return;
             
-            console.log('Starting capture...');
             updateBadge();
             
             try {
-                // Stop existing stream
                 if (stream) {
                     stream.getTracks().forEach(track => track.stop());
                     stream = null;
                 }
                 
+                // Always use back camera
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: 'environment',
-                        width: { ideal: 640 },
-                        height: { ideal: 480 },
+                        width: { ideal: currentSettings.width },
+                        height: { ideal: currentSettings.height },
                         frameRate: { ideal: 30 }
                     },
                     audio: false
                 });
                 
                 video.srcObject = stream;
-                video.style.display = 'block';
                 
                 await new Promise((resolve) => {
                     video.onloadedmetadata = () => {
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
-                        console.log('Video ready:', canvas.width, 'x', canvas.height);
-                        resolve();
+                        // Set canvas dimensions once
+                        canvas.width = currentSettings.width;
+                        canvas.height = currentSettings.height;
+                        // Wait until video actually has data
+                        if (video.readyState >= 2) {
+                            resolve();
+                        } else {
+                            video.oncanplay = resolve;
+                        }
                     };
                 });
                 
@@ -220,12 +239,11 @@
                 status.textContent = 'Streaming...';
                 status.style.color = '#2ecc71';
                 
-                // Start capture loop
-                requestAnimationFrame(captureFrame);
+                captureFrame();
                 
             } catch (err) {
                 console.error('Camera error:', err);
-                status.textContent = 'Camera error: ' + err.message;
+                status.textContent = 'Error: ' + err.message;
                 status.style.color = '#e74c3c';
                 capturing = false;
                 shouldCapture = false;
@@ -234,7 +252,6 @@
         }
         
         function stopCapture() {
-            console.log('Stopping capture...');
             capturing = false;
             
             if (stream) {
@@ -242,24 +259,80 @@
                 stream = null;
             }
             
-            video.style.display = 'none';
             updateBadge();
             status.textContent = 'Stopped';
             status.style.color = '#888';
         }
         
         function captureFrame() {
-            if (!capturing || !shouldCapture) {
-                if (capturing && !shouldCapture) {
-                    stopCapture();
-                }
+            if (!capturing || !shouldCapture || !stream) {
+                if (capturing) stopCapture();
+                return;
+            }
+            
+            // Don't draw if video isn't ready
+            if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+                setTimeout(captureFrame, 30);
                 return;
             }
             
             try {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                // Resize canvas only when settings change
+                if (canvas.width !== currentSettings.width || 
+                    canvas.height !== currentSettings.height) {
+                    canvas.width = currentSettings.width;
+                    canvas.height = currentSettings.height;
+                }
                 
-                const jpegData = canvas.toDataURL('image/jpeg', currentQuality);
+                // Reset transform completely
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                
+                // **Crucial: Do not clear the canvas**
+                // We will draw the video frame large enough to cover the whole canvas,
+                // even with rotation/zoom. This prevents any black flash.
+                
+                // Move to center
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                
+                // Apply rotation
+                if (currentSettings.rotation !== 0) {
+                    ctx.rotate((currentSettings.rotation * Math.PI) / 180);
+                }
+                
+                // Apply mirror and zoom
+                let scaleX = currentSettings.zoom;
+                let scaleY = currentSettings.zoom;
+                if (currentSettings.mirror_h) scaleX *= -1;
+                if (currentSettings.mirror_v) scaleY *= -1;
+                ctx.scale(scaleX, scaleY);
+                
+                // Calculate the size needed to cover the entire canvas after rotation
+                // (diagonal of the canvas divided by zoom essentially)
+                const diagonal = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height);
+                let coverSize = diagonal / currentSettings.zoom;
+                
+                const vidW = video.videoWidth;
+                const vidH = video.videoHeight;
+                const videoRatio = vidW / vidH;
+                
+                let drawW, drawH;
+                if (canvas.width / canvas.height > videoRatio) {
+                    drawW = coverSize;
+                    drawH = coverSize / videoRatio;
+                } else {
+                    drawH = coverSize;
+                    drawW = coverSize * videoRatio;
+                }
+                
+                // Draw the video frame centered, large enough to cover the canvas
+                ctx.drawImage(video, -drawW/2, -drawH/2, drawW, drawH);
+                
+                // Restore context (reset transform)
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                
+                // Encode with quality
+                const quality = currentSettings.quality / 100;
+                const jpegData = canvas.toDataURL('image/jpeg', quality);
                 const base64Data = jpegData.split(',')[1];
                 
                 const binaryString = atob(base64Data);
@@ -275,19 +348,19 @@
                 updateFPS();
                 
             } catch (err) {
-                console.error('Capture error:', err);
+                console.error('Frame error:', err);
             }
             
             if (capturing && shouldCapture) {
-                requestAnimationFrame(captureFrame);
+                setTimeout(captureFrame, 10);
             }
         }
         
         // Initialize
-        console.log('Initializing capture page...');
         connectWebSocket();
         startStatusPoll();
         checkStatus();
+        updateSettingsDisplay();
     </script>
 </body>
 </html>

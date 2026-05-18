@@ -12,7 +12,6 @@
     const termuxSettings = document.getElementById('termuxSettings');
     const browserSettings = document.getElementById('browserSettings');
     
-    // Termux settings
     const cameraId = document.getElementById('cameraId');
     const resolution = document.getElementById('resolution');
     const quality = document.getElementById('quality');
@@ -25,7 +24,6 @@
     const motionDetection = document.getElementById('motionDetection');
     const motionThreshold = document.getElementById('motionThreshold');
     
-    // Browser settings
     const browserResolution = document.getElementById('browserResolution');
     const browserQuality = document.getElementById('browserQuality');
     const browserZoom = document.getElementById('browserZoom');
@@ -33,14 +31,12 @@
     const browserMirrorH = document.getElementById('browserMirrorH');
     const browserMirrorV = document.getElementById('browserMirrorV');
     
-    // Labels
     const qualityLabel = document.getElementById('qualityLabel');
     const zoomLabel = document.getElementById('zoomLabel');
     const thresholdLabel = document.getElementById('thresholdLabel');
     const browserQualityLabel = document.getElementById('browserQualityLabel');
     const browserZoomLabel = document.getElementById('browserZoomLabel');
     
-    // Buttons
     const snapshotBtn = document.getElementById('snapshotBtn');
     const burstBtn = document.getElementById('burstBtn');
     const recordBtn = document.getElementById('recordBtn');
@@ -145,39 +141,35 @@
     function sendBrowserSettings() {
         clearTimeout(browserDebounce);
         browserDebounce = setTimeout(async () => {
-            if (currentMode === 'browser') {
-                await apiPost('/browser_settings', getBrowserSettings());
-            }
+            console.log('Sending browser settings:', getBrowserSettings());
+            const result = await apiPost('/browser_settings', getBrowserSettings());
+            console.log('Result:', result);
         }, 200);
     }
     
     [browserResolution, browserRotation].forEach(el => {
-        el.addEventListener('change', sendBrowserSettings);
-    });
+		el.addEventListener('change', sendBrowserSettings);
+	});
     
     [browserMirrorH, browserMirrorV].forEach(el => {
         el.addEventListener('change', sendBrowserSettings);
     });
     
-    // Capture mode switch - auto start/stop captures
     captureMode.addEventListener('change', async () => {
         const mode = captureMode.value;
         currentMode = mode;
         
-        await apiPost('/command', { 
-            command: 'switch_capture', 
-            mode: mode 
-        });
+        await apiPost('/command', { command: 'switch_capture', mode: mode });
         
         updateSettingsVisibility(mode);
         captureModeDisplay.textContent = `Mode: ${mode === 'browser' ? 'Browser' : 'Termux'}`;
         
         if (mode === 'browser') {
             sendBrowserSettings();
-            showToast('Switched to Browser mode. Phone camera auto-starts', 'info');
+            showToast('Switched to Browser mode', 'info');
         } else {
             sendTermuxSettings();
-            showToast('Switched to Termux mode. Browser camera auto-stops', 'info');
+            showToast('Switched to Termux mode', 'info');
         }
     });
     
@@ -227,6 +219,8 @@
         }
         
         const bSettings = await apiGet('/browser_settings');
+        console.log('Loaded browser settings:', bSettings);
+        if (bSettings.camera_facing) browserCamera.value = bSettings.camera_facing;
         if (bSettings.width && bSettings.height) {
             browserResolution.value = `${bSettings.width}x${bSettings.height}`;
         }
@@ -344,6 +338,6 @@
     
     loadSettings();
     updateSettingsVisibility('termux');
-    showToast('Ready! Switch modes to auto start/stop camera', 'success');
+    showToast('Ready!', 'success');
     
 })();

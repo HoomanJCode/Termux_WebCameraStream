@@ -37,7 +37,7 @@
                         <option value="320x240">320x240</option>
                         <option value="640x480" selected>640x480</option>
                         <option value="800x600">800x600</option>
-                        <option value="1280x720">1280x720</option>
+                        <option value="1280x720">1280x720 (HD)</option>
                     </select>
                 </div>
                 
@@ -94,56 +94,50 @@
             
             <!-- Browser Settings -->
             <div id="browserSettings" style="display:none;">
-                <h3>Browser Camera Settings</h3>
-                
-                <div class="control-group">
-                    <label>Camera:</label>
-                    <select id="browserCamera">
-                        <option value="environment">Back Camera</option>
-                        <option value="user">Front Camera</option>
-                    </select>
-                </div>
-                
-                <div class="control-group">
-                    <label>Resolution:</label>
-                    <select id="browserResolution">
-                        <option value="320x240">320x240</option>
-                        <option value="640x480" selected>640x480</option>
-                        <option value="800x600">800x600</option>
-                        <option value="1280x720">1280x720</option>
-                    </select>
-                </div>
-                
-                <div class="control-group">
-                    <label>Quality: <span id="browserQualityLabel">50</span>%</label>
-                    <input type="range" id="browserQuality" min="10" max="100" value="50">
-                </div>
-                
-                <div class="control-group">
-                    <label>Zoom: <span id="browserZoomLabel">1.0</span>x</label>
-                    <input type="range" id="browserZoom" min="1" max="5" step="0.1" value="1.0">
-                </div>
-                
-                <div class="control-group">
-                    <label>Rotation:</label>
-                    <select id="browserRotation">
-                        <option value="0">0°</option>
-                        <option value="90">90°</option>
-                        <option value="180">180°</option>
-                        <option value="270">270°</option>
-                    </select>
-                </div>
-                
-                <div class="control-group checkbox">
-                    <input type="checkbox" id="browserMirrorH">
-                    <label for="browserMirrorH">Mirror Horizontal</label>
-                </div>
-                
-                <div class="control-group checkbox">
-                    <input type="checkbox" id="browserMirrorV">
-                    <label for="browserMirrorV">Mirror Vertical</label>
-                </div>
-            </div>
+				<h3>Browser Camera Settings</h3>
+				
+				<div class="control-group">
+					<label>Resolution:</label>
+					<select id="browserResolution">
+						<option value="640x480">640x480 (4:3)</option>
+						<option value="854x480">854x480 (16:9)</option>
+						<option value="960x540">960x540 (16:9)</option>
+						<option value="1280x720" selected>1280x720 (HD)</option>
+						<option value="1920x1080">1920x1080 (Full HD)</option>
+					</select>
+				</div>
+				
+				<div class="control-group">
+					<label>Quality: <span id="browserQualityLabel">50</span>%</label>
+					<input type="range" id="browserQuality" min="10" max="100" value="50">
+					<small style="color: #888;">Lower = faster FPS</small>
+				</div>
+				
+				<div class="control-group">
+					<label>Zoom: <span id="browserZoomLabel">1.0</span>x</label>
+					<input type="range" id="browserZoom" min="1" max="5" step="0.1" value="1.0">
+				</div>
+				
+				<div class="control-group">
+					<label>Rotation:</label>
+					<select id="browserRotation">
+						<option value="0">0°</option>
+						<option value="90">90°</option>
+						<option value="180">180°</option>
+						<option value="270">270°</option>
+					</select>
+				</div>
+				
+				<div class="control-group checkbox">
+					<input type="checkbox" id="browserMirrorH">
+					<label for="browserMirrorH">Mirror Horizontal</label>
+				</div>
+				
+				<div class="control-group checkbox">
+					<input type="checkbox" id="browserMirrorV">
+					<label for="browserMirrorV">Mirror Vertical</label>
+				</div>
+			</div>
         </aside>
         
         <main class="main">
