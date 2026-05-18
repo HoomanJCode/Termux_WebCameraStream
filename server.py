@@ -56,7 +56,6 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-# Global state
 class AppState:
     def __init__(self):
         self.camera = None
@@ -66,12 +65,22 @@ class AppState:
         self.static_dir = None
         self.ws_clients = []
         self.browser_frame = None
-        self.use_browser_capture = False
+        self.capture_mode = 'termux'  # 'termux' or 'browser'
         self.frame_lock = threading.Lock()
         self.current_fps = 0
         self.fps_counter = 0
         self.fps_timer = time.time()
-        self.last_browser_frame_time = 0
+        # Separate settings for browser mode
+        self.browser_settings = {
+            'camera_facing': 'environment',  # 'user' for front, 'environment' for back
+            'width': 640,
+            'height': 480,
+            'quality': 50,
+            'mirror_h': False,
+            'mirror_v': False,
+            'rotation': 0,
+            'zoom': 1.0
+        }
 
 app = AppState()
 
@@ -156,13 +165,11 @@ class CameraHandler(BaseHTTPRequestHandler):
                     else:
                         data = self.request.recv(length)
                     
-                    if data and app.use_browser_capture:
-                        # Store frame directly without processing for speed
+                    # Only store browser frames if in browser mode
+                    if data and app.capture_mode == 'browser':
                         with app.frame_lock:
                             app.browser_frame = data
-                            app.last_browser_frame_time = time.time()
                         
-                        # Update FPS
                         app.fps_counter += 1
                         now = time.time()
                         if now - app.fps_timer >= 1.0:
@@ -173,7 +180,7 @@ class CameraHandler(BaseHTTPRequestHandler):
                         if app.recording:
                             app.recording_frames.append(data)
                     
-                except Exception as e:
+                except:
                     break
             
             if client in app.ws_clients:
@@ -186,7 +193,6 @@ class CameraHandler(BaseHTTPRequestHandler):
             return False
     
     def log_message(self, format, *args):
-        # Reduced logging
         if '/stream' not in self.path and '/api/stats' not in self.path:
             print(f"[{self.log_date_time_string()}] {self.path}")
     
@@ -204,6 +210,8 @@ class CameraHandler(BaseHTTPRequestHandler):
             
             if path == '/api/settings':
                 self._handle_get_settings()
+            elif path == '/api/browser_settings':
+                self._handle_get_browser_settings()
             elif path == '/api/stats':
                 self._handle_get_stats()
             elif path == '/stream':
@@ -241,6 +249,8 @@ class CameraHandler(BaseHTTPRequestHandler):
             
             if path == '/api/settings':
                 self._handle_post_settings(data)
+            elif path == '/api/browser_settings':
+                self._handle_post_browser_settings(data)
             elif path == '/api/command':
                 self._handle_command(data)
             else:
@@ -299,23 +309,46 @@ class CameraHandler(BaseHTTPRequestHandler):
         else:
             self._send_response(200, 'application/json', '{}')
     
+    def _handle_get_browser_settings(self):
+        self._send_response(200, 'application/json', json.dumps(app.browser_settings))
+    
     def _handle_get_stats(self):
-        fps = app.current_fps if app.use_browser_capture else (app.camera.current_fps if app.camera else 0)
+        fps = app.current_fps if app.capture_mode == 'browser' else (app.camera.current_fps if app.camera else 0)
         stats = {
             'fps': fps,
             'recording': app.recording,
-            'use_browser_capture': app.use_browser_capture,
+            'capture_mode': app.capture_mode,
             'ws_clients': len(app.ws_clients)
         }
         self._send_response(200, 'application/json', json.dumps(stats))
     
     def _handle_post_settings(self, data):
+        """Handle termux camera settings"""
         if app.settings and data:
-            # Remove fps from settings if present (we don't control it)
             data.pop('fps', None)
             app.settings.update(data)
             if app.camera:
                 app.camera.update_settings(data)
+        self._send_response(200, 'application/json', json.dumps({'status': 'ok'}))
+    
+    def _handle_post_browser_settings(self, data):
+        """Handle browser camera settings"""
+        for key in app.browser_settings:
+            if key in data:
+                app.browser_settings[key] = data[key]
+        
+        # Send updated settings to all WebSocket clients
+        settings_msg = json.dumps({
+            'type': 'settings',
+            'settings': app.browser_settings
+        })
+        for client in app.ws_clients[:]:
+            try:
+                client.send(settings_msg)
+            except:
+                if client in app.ws_clients:
+                    app.ws_clients.remove(client)
+        
         self._send_response(200, 'application/json', json.dumps({'status': 'ok'}))
     
     def _handle_command(self, data):
@@ -329,10 +362,11 @@ class CameraHandler(BaseHTTPRequestHandler):
                 app.camera.toggle_flash(False)
         elif command == 'switch_capture':
             mode = data.get('mode', 'termux')
-            app.use_browser_capture = (mode == 'browser')
-            if not app.use_browser_capture:
+            app.capture_mode = mode
+            if mode != 'browser':
                 with app.frame_lock:
                     app.browser_frame = None
+                app.current_fps = 0
             print(f"Capture mode switched to: {mode}")
             self._send_response(200, 'application/json', 
                               json.dumps({'status': 'ok', 'mode': mode}))
@@ -360,13 +394,12 @@ class CameraHandler(BaseHTTPRequestHandler):
             while True:
                 frame = None
                 
-                if app.use_browser_capture:
+                if app.capture_mode == 'browser':
                     with app.frame_lock:
                         frame = app.browser_frame
                 elif app.camera:
                     frame = app.camera.get_frame()
                 
-                # Only send if frame is new
                 if frame and frame != last_frame:
                     try:
                         self.wfile.write(b'--frame\r\n')
@@ -380,11 +413,7 @@ class CameraHandler(BaseHTTPRequestHandler):
                     except:
                         break
                 
-                # Faster sleep for browser mode
-                if app.use_browser_capture:
-                    time.sleep(0.001)  # Minimal delay
-                else:
-                    time.sleep(0.05)
+                time.sleep(0.001 if app.capture_mode == 'browser' else 0.05)
                 
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -394,7 +423,7 @@ class CameraHandler(BaseHTTPRequestHandler):
     def _handle_snapshot(self):
         frame = None
         
-        if app.use_browser_capture:
+        if app.capture_mode == 'browser':
             with app.frame_lock:
                 frame = app.browser_frame
         elif app.camera:
@@ -471,7 +500,6 @@ def main():
     
     app.camera.start()
     
-    # Use serve_forever in a way that allows Ctrl+C
     server = ThreadingHTTPServer(('', args.port), CameraHandler)
     
     print("=" * 50)
@@ -482,13 +510,11 @@ def main():
     print(f"🖥️  PC viewer: http://localhost:{args.port}")
     print(f"\nPress Ctrl+C to stop\n")
     
-    # Run server in a way that allows clean exit
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.daemon = True
     server_thread.start()
     
     try:
-        # Keep main thread alive but responsive to Ctrl+C
         while server_thread.is_alive():
             server_thread.join(1)
     except KeyboardInterrupt:

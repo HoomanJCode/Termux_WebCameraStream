@@ -1,6 +1,7 @@
 (function() {
     'use strict';
     
+    // DOM
     const stream = document.getElementById('stream');
     const fpsDisplay = document.getElementById('fpsDisplay');
     const captureModeDisplay = document.getElementById('captureModeDisplay');
@@ -9,6 +10,10 @@
     const toasts = document.getElementById('toasts');
     
     const captureMode = document.getElementById('captureMode');
+    const termuxSettings = document.getElementById('termuxSettings');
+    const browserSettings = document.getElementById('browserSettings');
+    
+    // Termux settings
     const cameraId = document.getElementById('cameraId');
     const resolution = document.getElementById('resolution');
     const quality = document.getElementById('quality');
@@ -20,12 +25,24 @@
     const showGrid = document.getElementById('showGrid');
     const motionDetection = document.getElementById('motionDetection');
     const motionThreshold = document.getElementById('motionThreshold');
-    const termuxOnly = document.getElementById('termuxOnly');
     
+    // Browser settings
+    const browserCamera = document.getElementById('browserCamera');
+    const browserResolution = document.getElementById('browserResolution');
+    const browserQuality = document.getElementById('browserQuality');
+    const browserZoom = document.getElementById('browserZoom');
+    const browserRotation = document.getElementById('browserRotation');
+    const browserMirrorH = document.getElementById('browserMirrorH');
+    const browserMirrorV = document.getElementById('browserMirrorV');
+    
+    // Labels
     const qualityLabel = document.getElementById('qualityLabel');
     const zoomLabel = document.getElementById('zoomLabel');
     const thresholdLabel = document.getElementById('thresholdLabel');
+    const browserQualityLabel = document.getElementById('browserQualityLabel');
+    const browserZoomLabel = document.getElementById('browserZoomLabel');
     
+    // Buttons
     const snapshotBtn = document.getElementById('snapshotBtn');
     const burstBtn = document.getElementById('burstBtn');
     const recordBtn = document.getElementById('recordBtn');
@@ -38,23 +55,36 @@
     let isRecording = false;
     let currentMode = 'termux';
     
-    // Update labels and send settings in real-time
+    // Show/hide settings based on mode
+    function updateSettingsVisibility(mode) {
+        if (mode === 'browser') {
+            termuxSettings.style.display = 'none';
+            browserSettings.style.display = 'block';
+            flashBtn.style.display = 'none'; // Flash only for termux
+        } else {
+            termuxSettings.style.display = 'block';
+            browserSettings.style.display = 'none';
+            flashBtn.style.display = 'inline-block';
+        }
+    }
+    
+    // Termux settings - real-time update
     quality.addEventListener('input', () => {
         qualityLabel.textContent = quality.value;
-        sendSettings();
+        sendTermuxSettings();
     });
     
     zoom.addEventListener('input', () => {
         zoomLabel.textContent = parseFloat(zoom.value).toFixed(1);
-        sendSettings();
+        sendTermuxSettings();
     });
     
     motionThreshold.addEventListener('input', () => {
         thresholdLabel.textContent = motionThreshold.value;
-        sendSettings();
+        sendTermuxSettings();
     });
     
-    function getSettingsFromForm() {
+    function getTermuxSettings() {
         const [w, h] = resolution.value.split('x');
         return {
             camera_id: parseInt(cameraId.value),
@@ -72,24 +102,68 @@
         };
     }
     
-    let debounceTimer;
-    function sendSettings() {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(async () => {
-            await apiPost('/settings', getSettingsFromForm());
+    let termuxDebounce;
+    function sendTermuxSettings() {
+        clearTimeout(termuxDebounce);
+        termuxDebounce = setTimeout(async () => {
+            if (currentMode === 'termux') {
+                await apiPost('/settings', getTermuxSettings());
+            }
         }, 200);
     }
     
-    // Immediate send for selects and checkboxes
     [resolution, rotation, cameraId].forEach(el => {
-        el.addEventListener('change', sendSettings);
+        el.addEventListener('change', sendTermuxSettings);
     });
     
     [mirrorH, mirrorV, showTimestamp, showGrid, motionDetection].forEach(el => {
-        el.addEventListener('change', sendSettings);
+        el.addEventListener('change', sendTermuxSettings);
     });
     
-    // Capture mode change
+    // Browser settings - real-time update
+    browserQuality.addEventListener('input', () => {
+        browserQualityLabel.textContent = browserQuality.value;
+        sendBrowserSettings();
+    });
+    
+    browserZoom.addEventListener('input', () => {
+        browserZoomLabel.textContent = parseFloat(browserZoom.value).toFixed(1);
+        sendBrowserSettings();
+    });
+    
+    function getBrowserSettings() {
+        const [w, h] = browserResolution.value.split('x');
+        return {
+            camera_facing: browserCamera.value,
+            width: parseInt(w),
+            height: parseInt(h),
+            quality: parseInt(browserQuality.value),
+            zoom: parseFloat(browserZoom.value),
+            rotation: parseInt(browserRotation.value),
+            mirror_h: browserMirrorH.checked,
+            mirror_v: browserMirrorV.checked
+        };
+    }
+    
+    let browserDebounce;
+    function sendBrowserSettings() {
+        clearTimeout(browserDebounce);
+        browserDebounce = setTimeout(async () => {
+            if (currentMode === 'browser') {
+                await apiPost('/browser_settings', getBrowserSettings());
+            }
+        }, 200);
+    }
+    
+    [browserCamera, browserResolution, browserRotation].forEach(el => {
+        el.addEventListener('change', sendBrowserSettings);
+    });
+    
+    [browserMirrorH, browserMirrorV].forEach(el => {
+        el.addEventListener('change', sendBrowserSettings);
+    });
+    
+    // Capture mode switch
     captureMode.addEventListener('change', async () => {
         const mode = captureMode.value;
         currentMode = mode;
@@ -99,13 +173,16 @@
             mode: mode 
         });
         
+        updateSettingsVisibility(mode);
         captureModeDisplay.textContent = `Mode: ${mode === 'browser' ? 'Browser' : 'Termux'}`;
-        termuxOnly.style.display = mode === 'termux' ? 'block' : 'none';
         
-        showToast(`Switched to ${mode} mode`, 'info');
-        
+        // Send appropriate settings after mode switch
         if (mode === 'browser') {
-            showToast('Open /capture on your phone', 'warning');
+            sendBrowserSettings();
+            showToast('Switched to Browser mode. Open /capture on phone', 'info');
+        } else {
+            sendTermuxSettings();
+            showToast('Switched to Termux mode', 'info');
         }
     });
     
@@ -136,6 +213,7 @@
     }
     
     async function loadSettings() {
+        // Load termux settings
         const settings = await apiGet('/settings');
         if (settings.camera_id !== undefined) cameraId.value = settings.camera_id;
         if (settings.width && settings.height) {
@@ -144,15 +222,27 @@
         if (settings.quality) { quality.value = settings.quality; qualityLabel.textContent = settings.quality; }
         if (settings.zoom) { zoom.value = settings.zoom; zoomLabel.textContent = settings.zoom.toFixed(1); }
         if (settings.rotation !== undefined) rotation.value = settings.rotation;
-        if (settings.mirror_h !== undefined) mirrorH.checked = settings.mirror_h;
-        if (settings.mirror_v !== undefined) mirrorV.checked = settings.mirror_v;
-        if (settings.show_timestamp !== undefined) showTimestamp.checked = settings.show_timestamp;
-        if (settings.show_grid !== undefined) showGrid.checked = settings.show_grid;
-        if (settings.motion_detection !== undefined) motionDetection.checked = settings.motion_detection;
+        mirrorH.checked = settings.mirror_h || false;
+        mirrorV.checked = settings.mirror_v || false;
+        showTimestamp.checked = settings.show_timestamp || false;
+        showGrid.checked = settings.show_grid || false;
+        motionDetection.checked = settings.motion_detection || false;
         if (settings.motion_threshold) { 
             motionThreshold.value = settings.motion_threshold; 
             thresholdLabel.textContent = settings.motion_threshold;
         }
+        
+        // Load browser settings
+        const bSettings = await apiGet('/browser_settings');
+        if (bSettings.camera_facing) browserCamera.value = bSettings.camera_facing;
+        if (bSettings.width && bSettings.height) {
+            browserResolution.value = `${bSettings.width}x${bSettings.height}`;
+        }
+        if (bSettings.quality) { browserQuality.value = bSettings.quality; browserQualityLabel.textContent = bSettings.quality; }
+        if (bSettings.zoom) { browserZoom.value = bSettings.zoom; browserZoomLabel.textContent = bSettings.zoom.toFixed(1); }
+        if (bSettings.rotation !== undefined) browserRotation.value = bSettings.rotation;
+        browserMirrorH.checked = bSettings.mirror_h || false;
+        browserMirrorV.checked = bSettings.mirror_v || false;
     }
     
     async function takeSnapshot() {
@@ -239,7 +329,7 @@
         if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
     });
     
-    // Update stats and mode display
+    // Stats polling
     setInterval(async () => {
         const stats = await apiGet('/stats');
         fpsDisplay.textContent = `FPS: ${stats.fps || 0}`;
@@ -249,17 +339,12 @@
             setTimeout(() => motionAlert.style.display = 'none', 1000);
         }
         
-        // Update mode display based on server state
-        if (stats.use_browser_capture && captureMode.value !== 'browser') {
-            captureMode.value = 'browser';
-            captureModeDisplay.textContent = 'Mode: Browser';
-            termuxOnly.style.display = 'none';
-            currentMode = 'browser';
-        } else if (!stats.use_browser_capture && captureMode.value !== 'termux') {
-            captureMode.value = 'termux';
-            captureModeDisplay.textContent = 'Mode: Termux';
-            termuxOnly.style.display = 'block';
-            currentMode = 'termux';
+        // Sync mode with server
+        if (stats.capture_mode && stats.capture_mode !== currentMode) {
+            currentMode = stats.capture_mode;
+            captureMode.value = currentMode;
+            updateSettingsVisibility(currentMode);
+            captureModeDisplay.textContent = `Mode: ${currentMode === 'browser' ? 'Browser' : 'Termux'}`;
         }
     }, 500);
     
@@ -267,7 +352,9 @@
         document.body.classList.add('light');
     }
     
+    // Initialize
     loadSettings();
-    showToast('Ready! Change settings in real-time', 'success');
+    updateSettingsVisibility('termux');
+    showToast('Ready! Settings update in real-time', 'success');
     
 })();

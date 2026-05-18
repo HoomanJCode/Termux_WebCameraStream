@@ -15,52 +15,39 @@
             min-height: 100vh;
             font-family: Arial, sans-serif;
         }
-        .container {
-            text-align: center;
-            color: white;
-        }
-        video {
-            width: 100%;
-            max-width: 640px;
-            border-radius: 10px;
-            display: none;
-        }
-        canvas {
-            display: none;
-        }
-        .status {
-            margin-top: 20px;
-            font-size: 18px;
-        }
+        .container { text-align: center; color: white; }
+        video { width: 100%; max-width: 640px; border-radius: 10px; display: none; }
+        canvas { display: none; }
+        .status { margin-top: 20px; font-size: 18px; }
         .fps {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 10px;
-            border-radius: 5px;
-            z-index: 100;
-            font-size: 20px;
+            position: fixed; top: 10px; left: 10px;
+            background: rgba(0,0,0,0.7); color: white;
+            padding: 10px; border-radius: 5px; z-index: 100; font-size: 20px;
         }
         button {
-            padding: 15px 30px;
-            font-size: 18px;
-            background: #4a90d9;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            margin: 10px;
+            padding: 15px 30px; font-size: 18px;
+            background: #4a90d9; color: white;
+            border: none; border-radius: 10px; cursor: pointer; margin: 10px;
         }
-        button:disabled {
-            background: #666;
-            cursor: not-allowed;
+        button:disabled { background: #666; cursor: not-allowed; }
+        .settings-panel {
+            position: fixed; top: 10px; right: 10px;
+            background: rgba(0,0,0,0.8); color: white;
+            padding: 15px; border-radius: 10px; font-size: 14px;
+            z-index: 100; text-align: left; display: none;
+        }
+        .settings-panel select {
+            width: 100%; padding: 5px; margin-top: 5px;
+            background: #333; color: white; border: 1px solid #555;
+            border-radius: 5px;
         }
     </style>
 </head>
 <body>
     <div class="fps" id="fps">FPS: 0</div>
+    <div class="settings-panel" id="settingsPanel">
+        <div>Camera: <span id="currentCamera">Back</span></div>
+    </div>
     <div class="container">
         <video id="video" autoplay playsinline></video>
         <canvas id="canvas"></canvas>
@@ -77,6 +64,8 @@
         const stopBtn = document.getElementById('stopBtn');
         const status = document.getElementById('status');
         const fpsDisplay = document.getElementById('fps');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const currentCamera = document.getElementById('currentCamera');
         
         let stream = null;
         let ws = null;
@@ -84,6 +73,7 @@
         let frameCount = 0;
         let lastFpsUpdate = Date.now();
         let currentFps = 0;
+        let cameraFacing = 'environment'; // 'environment' = back, 'user' = front
         
         const serverUrl = window.location.origin.replace('http', 'ws');
         
@@ -99,9 +89,7 @@
         }
         
         function connectWebSocket() {
-            if (ws) {
-                ws.close();
-            }
+            if (ws) ws.close();
             
             ws = new WebSocket(serverUrl);
             
@@ -110,28 +98,47 @@
                 status.style.color = '#2ecc71';
             };
             
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'settings') {
+                        // Update camera facing if changed
+                        if (data.settings.camera_facing && data.settings.camera_facing !== cameraFacing) {
+                            cameraFacing = data.settings.camera_facing;
+                            currentCamera.textContent = cameraFacing === 'user' ? 'Front' : 'Back';
+                            restartCamera();
+                        }
+                    }
+                } catch(e) {}
+            };
+            
             ws.onerror = () => {
                 status.textContent = 'Connection error - retrying...';
                 status.style.color = '#e74c3c';
-                if (capturing) {
-                    setTimeout(connectWebSocket, 1000);
-                }
+                if (capturing) setTimeout(connectWebSocket, 1000);
             };
             
             ws.onclose = () => {
                 status.textContent = 'Disconnected';
                 status.style.color = '#e74c3c';
-                if (capturing) {
-                    setTimeout(connectWebSocket, 1000);
-                }
+                if (capturing) setTimeout(connectWebSocket, 1000);
             };
         }
         
         async function startCamera() {
+            await initCamera();
+        }
+        
+        async function initCamera() {
             try {
+                // Stop existing stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        facingMode: 'environment',
+                        facingMode: cameraFacing,
                         width: { ideal: 640 },
                         height: { ideal: 480 },
                         frameRate: { ideal: 30 }
@@ -150,21 +157,29 @@
                     };
                 });
                 
-                connectWebSocket();
+                if (!capturing) {
+                    connectWebSocket();
+                    capturing = true;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    settingsPanel.style.display = 'block';
+                    requestAnimationFrame(captureFrame);
+                }
                 
-                capturing = true;
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
+                currentCamera.textContent = cameraFacing === 'user' ? 'Front' : 'Back';
                 status.textContent = 'Capturing...';
                 status.style.color = '#2ecc71';
-                
-                // Start capture loop
-                requestAnimationFrame(captureFrame);
                 
             } catch (err) {
                 console.error('Camera error:', err);
                 status.textContent = 'Error: ' + err.message;
                 status.style.color = '#e74c3c';
+            }
+        }
+        
+        async function restartCamera() {
+            if (capturing) {
+                await initCamera();
             }
         }
         
@@ -182,6 +197,7 @@
             }
             
             video.style.display = 'none';
+            settingsPanel.style.display = 'none';
             startBtn.disabled = false;
             stopBtn.disabled = true;
             status.textContent = 'Stopped';
@@ -192,21 +208,17 @@
             if (!capturing) return;
             
             try {
-                // Draw video frame to canvas
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                // Get JPEG at lower quality for speed
                 const jpegData = canvas.toDataURL('image/jpeg', 0.5);
                 const base64Data = jpegData.split(',')[1];
                 
-                // Convert to binary
                 const binaryString = atob(base64Data);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
                     bytes[i] = binaryString.charCodeAt(i);
                 }
                 
-                // Send via WebSocket
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(bytes);
                 }
@@ -217,7 +229,6 @@
                 console.error('Capture error:', err);
             }
             
-            // Schedule next frame immediately
             if (capturing) {
                 requestAnimationFrame(captureFrame);
             }
