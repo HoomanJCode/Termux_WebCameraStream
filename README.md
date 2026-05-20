@@ -41,7 +41,7 @@ pkg install python termux-api -y
 pip install Pillow
 
 # Clone the repository
-git clone https://github.com/yourusername/Termux_WebCameraStream.git
+git clone https://github.com/HoomanJCode/Termux_WebCameraStream.git
 cd Termux_WebCameraStream
 
 # Run the server
@@ -214,7 +214,7 @@ This project was created through **vibe coding** with [DeepSeek](https://deepsee
 
 ```bash
 # Fork and clone
-git clone https://github.com/yourusername/Termux_WebCameraStream.git
+git clone https://github.com/HoomanJCode/Termux_WebCameraStream.git
 cd Termux_WebCameraStream
 
 # Create a test environment
@@ -285,14 +285,6 @@ MIT License - See [LICENSE](LICENSE) file for details.
 ## 🌟 Star History
 
 If this project helps you, please ⭐ star it on GitHub! It helps others find it and motivates further development.
-
----
-
-## 📞 Support
-
-- **Issues:** [GitHub Issues](https://github.com/yourusername/Termux_WebCameraStream/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/yourusername/Termux_WebCameraStream/discussions)
-- **Termux Community:** [Reddit r/termux](https://reddit.com/r/termux)
 
 ---
 
